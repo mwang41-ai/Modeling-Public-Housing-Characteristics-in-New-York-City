@@ -1,0 +1,147 @@
+library(dplyr)
+library(ggplot2)
+library(leaflet)
+
+data <- read.csv("bbl.csv")
+
+#add one variable
+data$assessed_value_perunit <- data$assessed_value / data$res_units
+
+#Part 1: Define a research question
+#What differentiates NYCHA public housing from other subsidized housing?
+
+#basic data visualizations
+boxplot(year_built ~ prog_nycha_ph, 
+        data = data,
+        xlab = "Public Housing",
+        ylab = "Year Built"
+        )
+
+boxplot(res_units ~ prog_nycha_ph,
+        data = data,
+        xlab = "Public Housing",
+        ylab = "Residential Units"
+        )
+
+boxplot(assessed_value ~ prog_nycha_ph,
+        data = data,
+        xlab = "Public Housing",
+        ylab = "Assessed Value ($)"
+        )
+
+boxplot(assessed_value_perunit ~ prog_nycha_ph,
+        data = data,
+        xlab = "Public Housing",
+        ylab = "Assessed Value ($ per unit)"
+        )
+
+boxplot(net_inc_sqft ~ prog_nycha_ph,
+        data = data,
+        xlab = "Public Housing",
+        ylab = "Net Rental Income ($ per sq.ft.)"
+        )
+
+#correlations, using Kendall's tau b/c data is categorical
+cor.test(data$prog_nycha_ph, data$year_built, method = "kendall")
+cor.test(data$prog_nycha_ph, data$res_units, method = "kendall")
+cor.test(data$prog_nycha_ph, data$assessed_value_perunit, method = "kendall")
+cor.test(data$prog_nycha_ph, data$net_inc_sqft, method = "kendall")
+
+#make a map
+options(viewer = NULL) #open in browser instead of R
+map <- leaflet()
+map <- addTiles(map) #OpenStreetMap tile layer
+map <- addProviderTiles(map, "Stadia.StamenToner") #BnW, high contrast map
+
+public_housing <- data %>%
+  filter(prog_nycha_ph == 1) #filter public housing
+
+map <- addCircleMarkers(map,
+                        lng = public_housing$longitude,
+                        lat = public_housing$latitude,
+                        radius = 1.5,
+                        color = "red"
+                        ) #add circle markers
+
+
+map <- addLegend(map,
+                 "topright",
+                 colors = "red",
+                 labels = "Public Housing",
+                 title = "Public Housing",
+                 opacity = 1
+                 ) #add legend, top right
+                 map
+
+#Part 2: define and interpret logistic models
+
+#define predictors                 
+predictors <- c("year_built", "res_units", "net_inc_sqft", "assessed_value_perunit")
+
+#create an empty data frame to store results
+results <- data.frame(
+  Predictor = character(),
+  Coefficient = numeric(),
+  Odds_Ratio = numeric(),
+  P_Value = numeric(),
+  Null_Deviance = numeric(),
+  Model_Deviance = numeric(),
+  Deviance_Drop = numeric(),
+  AIC = numeric(),
+  stringsAsFactors = FALSE
+)
+
+#write a loop to test each predictor
+for (variable in predictors){
+  
+  #build the formula
+  formula <- as.formula(paste("prog_nycha_ph~", variable))
+  
+  #fit the model
+  model <- glm(formula, data = data, family = "binomial")
+  
+  #model summary
+  summary_model <- summary(model)
+  
+  coef_val <- coef(summary_model)[2,1] #coefficient
+  odds_ratio <- exp(coef_val) #odd ratios
+  p_val <- coef(summary_model)[2,4] #p-value
+  aic_val <- summary_model$aic #AIC value
+  
+  #deviance
+  null_dev <- model$null.deviance
+  model_dev <- model$deviance
+  dev_drop <- null_dev - model_dev
+
+  results <- rbind(results, data.frame(
+    Predictor = variable,
+    Coefficient = round(coef_val, 5), #Round to 5 decimal place
+    Odds_Ratio = round(odds_ratio, 3), 
+    P_Value = round(p_val, 4),
+    Null_Deviance = round(null_dev, 1), 
+    Model_Deviance = round(model_dev, 1), 
+    Deviance_Drop = round(dev_drop, 1), 
+    AIC = round(aic_val, 1) 
+  ))
+}
+print(results)
+
+
+#Part 3: define and interpret a logistic model with all variables
+
+#define the model
+log_model <- glm(prog_nycha_ph ~ year_built + net_inc_sqft + assessed_value_perunit, 
+                 data = data, family = "binomial") #dropped res_units to fix the warning message
+
+#print the results
+summary(log_model)
+
+# convert coefficients and confidence intervals to odds-ratio terms
+exp(coefficients(log_model))
+exp(confint.default(log_model)) #lower and upper 95% CI bounds
+
+
+# Interpret analysis of deviance table
+anova(log_model, "Chisquare")                 
+                 
+                 
